@@ -70,6 +70,22 @@ movielens <- left_join(ratings, movies, by = "movieId")
 #Identify films that do not have a rating in the ratings dataset
 unrated <- anti_join(movies, ratings, by = "movieId")
 dim(unrated)
+
+#Format the timestamp 
+date_format <- function(date){
+  #POSIXct formatting
+  #Round the time to the nearest hour in order to group by hour later 
+  new_date <- as_datetime(date, origin="1970-01-01") 
+  round_date(new_date, unit = "1 hour")              
+}
+#Create new features for release year and the rating timestamp
+movielens <- movielens %>%
+  mutate(rating_timestamp = date_format(timestamp),
+         rating_year = year(rating_timestamp),    
+         rating_month = month(rating_timestamp),
+         rating_day = day(rating_timestamp),
+         rating_hour = hour(rating_timestamp)) 
+
 # Validation set will be 10% of MovieLens data
 set.seed(1)
 test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
@@ -88,21 +104,6 @@ edx <- rbind(edx, removed)
 #Use str() or glimnpse() to check the fields that are contained in the training set. Check for factors to then determine if there are any novel levels that could potentially impact the algorithm.
 #Using string it is clear that there is a small number of dimensions in the training set.
 str(edx)
-
-#Format the timestamp 
-date_format <- function(date){
-#POSIXct formatting
-#Round the time to the nearest hour in order to group by hour later 
-  new_date <- as_datetime(date, origin="1970-01-01") 
-  round_date(new_date, unit = "1 hour")              
-}
-#Create new features for release year and the rating timestamp
-edx <- edx %>%
-  mutate(rating_timestamp = date_format(timestamp),
-         rating_year = year(rating_timestamp),    
-         rating_month = month(rating_timestamp),
-         rating_day = day(rating_timestamp),
-         rating_hour = hour(rating_timestamp)) 
 
 # Free up memory. The movies dataset is kept in memory in order to perform some validations on movies only. For example number of movies released per year.
 rm(removed, movielens, ratings, temp)
@@ -182,7 +183,7 @@ edx_categories %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), 
              family="Helvetica", 
              size = 6)
 
-#Distribution of ratings by movie
+#Average rating by category distributed by decade
 edx_categories %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), unit = "10 years"))) %>%
   group_by(decade, category) %>%
   summarise(mean_rating = mean(rating)) %>%
@@ -194,13 +195,54 @@ edx_categories %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), 
   labs(title="Average Movie Rating",
          subtitle = "Average rating 4.0 or higher")
 
-ANSEO - STOPPED HERE Reduce the size of the BBC X and Y axes
+#Display the distribution by the Day of the Week and hour of the rating that was provided by the user.
+edx_categories %>% mutate(day_of_week = wday(rating_timestamp, label = TRUE)) %>%
+  group_by(day_of_week, rating_hour, category) %>%
+  summarise(mean_rating = mean(rating),
+            num_ratings = n()) %>%
+  ggplot(aes(x=day_of_week, y=rating_hour, fill=num_ratings)) +
+  geom_tile() +
+  facet_wrap(~category)
 
-#Average rating by category
-#Average rating by time of day
+#The following tibble supports the findings of the heat map, showing that Comedy, Drama and Action receive the largest amount of ratings.
+edx_categories %>% group_by(category) %>%
+  summarise(mean_rating = mean(rating),
+            num_ratings = n()) %>%
+  arrange(desc(num_ratings))
+    
+#Display the distribution by the Day of the Week and hour of the rating that was provided by the user.
+edx_categories %>% mutate(day_of_week = wday(rating_timestamp, label = TRUE)) %>%
+  filter(category == "Drama") %>%
+  group_by(day_of_week, rating_hour) %>%
+  summarise(mean_rating = mean(rating),
+            num_ratings = n()) %>%
+  ggplot(aes(x=day_of_week, y=rating_hour, fill=num_ratings)) +
+  geom_tile() 
+
 #Average rating by month
-#Average rating by day
 #Distribution of ratings by movie release year
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #Can you identify remakes and compare the ratings and number of ratings?
 ANSEO Mutate to identify the original and colour code it. So set the minimum year to original!!!!
@@ -240,10 +282,7 @@ edx_ext %>% ggplot(aes(x = category)) +
 edx_ext %>% ggplot(aes(x=rating_month)) +
   geom_bar()
 
-#Display the distribution by weekday
-edx_ext %>% mutate(weekday = wday(rating_timestamp, label = TRUE)) %>%
-  ggplot(aes(x=weekday)) +
-  geom_bar()
+
 
 #Display the distribution by Time of day
 edx_ext %>% ggplot(aes(x=rating_hour)) +
