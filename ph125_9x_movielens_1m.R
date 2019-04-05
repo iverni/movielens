@@ -111,7 +111,7 @@ rm(removed, movielens, ratings, temp)
 #It is however slower than summary() when checking the processing timings. It can be used in conjuction with tidyverse and 
 #produces a more readable output. 
 summary(edx)
-descr(edx)
+#descr(edx)
 
 #The results of the descriptive stats summary shows that there are no NA records present in the data. As there are few
 #dimensions the resulting vector is not created as a dataframe. Based on the results there is not need to handle NAs
@@ -124,23 +124,19 @@ table(duplicated(edx))
 
 #Split the genres in to specific categories in order to assess the data by a single genre rather than a combination of genres. So for example, 
 # "Musical|Romance" will be split out to "Musical" and "Romance"
-edx_ext <- edx %>%
+edx_categories <- edx %>%
   mutate(category = genres) %>% 
   separate_rows(category, sep ="[|]") 
 
-sapply(edx_ext, function(x) sum(length(which(is.na(x)))))
-summary(edx_ext$category)  #This demonstrates that it is necessary to factorize the category variable
-edx_ext$category <- as.factor(edx_ext$category)
+sapply(edx_categories, function(x) sum(length(which(is.na(x)))))
+summary(edx_categories$category)  #This demonstrates that it is necessary to factorize the category variable
+edx_categories$category <- as.factor(edx_categories$category)
 
 toc()
 ####Exploratory Data Analysis----
 tic("Exploratory Data Analysis")
 #How many films where not rated.
 dim(unrated)
-
-Movies dataset analysis
-EDX dataset analysis
-EDX extended dataset analysis
 
 n_distinct(edx$movieId) #How many films have been rated
 n_distinct(edx$userId)  #How many unique users provided ratings
@@ -157,22 +153,54 @@ movies %>% group_by(release_year) %>%
 movies %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), unit = "10 years"))) %>%
   group_by(decade) %>%
   summarise(releases = n()) %>%
-  ggplot(aes(x=factor(decade), y=releases, label=decade)) +
-  geom_col() +
+  ggplot(aes(x=factor(decade), y=releases, label=releases)) +
+  geom_col(fill="#1380A1") +
   geom_text(size = 3, position = position_dodge(width = 1), vjust = -0.25) +
-  bbc_style()
-
-
+  bbc_style() +
+  labs(title="Movie Rated",
+       subtitle = "Number of movies released per decade that have been rated") +
+  theme(axis.ticks.x = element_line(colour = "#333333"),
+        axis.ticks.length =  unit(0.26, "cm")) 
 
 #Distribution of ratings by movie
-#Distribution of ratings by users
-#Distribution of ratings by movie release year
+edx_categories %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), unit = "10 years"))) %>%
+  group_by(decade) %>%
+  summarise(mean_rating = mean(rating)) %>%
+  ggplot(aes(x=factor(decade), y=mean_rating)) +
+  geom_col(fill="#1380A1") +
+  bbc_style() +
+  labs(title="Average Movie Rating",
+       subtitle = "Average rating received for movies released per decade") +
+  theme(axis.ticks.x = element_line(colour = "#333333"),
+        axis.ticks.length =  unit(0.26, "cm")) +
+   geom_label(aes(label = round(mean_rating,2)),
+             hjust = 0.5, 
+             vjust = 1, 
+             colour = "white", 
+             fill = NA, 
+             label.size = NA, 
+             family="Helvetica", 
+             size = 6)
 
+#Distribution of ratings by movie
+edx_categories %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), unit = "10 years"))) %>%
+  group_by(decade, category) %>%
+  summarise(mean_rating = mean(rating)) %>%
+  ggplot(aes(x=factor(decade), y=mean_rating, fill = ifelse(mean_rating > 4, "above4", "below4"))) +
+  facet_wrap(~category) +
+  geom_col() +
+  scale_fill_discrete(name="Rating") +
+  coord_flip() +
+  labs(title="Average Movie Rating",
+         subtitle = "Average rating 4.0 or higher")
+
+ANSEO - STOPPED HERE Reduce the size of the BBC X and Y axes
 
 #Average rating by category
 #Average rating by time of day
 #Average rating by month
 #Average rating by day
+#Distribution of ratings by movie release year
 
 #Can you identify remakes and compare the ratings and number of ratings?
 ANSEO Mutate to identify the original and colour code it. So set the minimum year to original!!!!
