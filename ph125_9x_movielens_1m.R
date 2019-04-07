@@ -2,15 +2,17 @@
 ## Packages
 # pacman    : This contains tools to more conveniently perform tasks associated with add-on packages.
 # snakecase : Collection of miscellaneous utility functions, supporting data transformation
+# ggalt     : Support geom_dumbbell()
 # devtools  : Collection of R development tools
 if(!require(pacman))install.packages("pacman")
 if(!require(snakecase))install.packages('snakecase')
+if(!require(ggalt))install.packages('ggalt')
 if(!require(devtools))install.packages('devtools')
 devtools::install_github('bbc/bbplot')    #Load the BBC plots for use with ggplot2
 pacman::p_load('data.table',                              # Data Importation
                'tidyverse', 'dplyr', 'tidyr', 'stringr',  # Data Manipulation
                'sjmisc', 'snakecase', 'lubridate',        # Data Manipulation
-               'ggplot2', 'bbplot',                       # Visualisation 
+               'ggplot2', 'bbplot', 'ggalt',              # Visualisation 
                'caret',                                   # Classification and Regression 
                'tictoc'                                   # Performance measuring
 )
@@ -42,7 +44,10 @@ colnames(movies) <- c("movieId", "title", "genres")
 movies <- as.data.frame(movies) %>% mutate(movieId = as.numeric(levels(movieId))[movieId],
                                            title = as.character(title),
                                            genres = as.character(genres))
-
+toc() 
+####Data Preparation----
+tic("Data Preparation")
+#Create new features for release year and the rating timestamp
 #Split the year out from Title in to it's own column.
 pattern <- "[(]\\d{4}[)]"    #Builds a pattern (year) i.e. ()
 string_format <- function(x){
@@ -52,18 +57,32 @@ string_format <- function(x){
     str_replace("[()]","") %>%
     str_replace("[)]","") %>% 
     str_trim()
+} 
+#Format the timestamp 
+date_format <- function(date){
+  #POSIXct formatting
+  #Round the time to the nearest hour in order to group by hour later 
+  new_date <- as_datetime(date, origin="1970-01-01") 
+  round_date(new_date, unit = "1 hour")              
 }
-#Create new features for release year and the rating timestamp
 movies <- movies %>%
   mutate(release_year = string_format(title),
          film = str_replace(title, pattern, "")) 
-toc() 
-####Data Preparation----
-tic("Data Preparation")
+
+#Combine the ratings and movies datasets
 movielens <- left_join(ratings, movies, by = "movieId")
+#Create new features for release year and the rating timestamp
+movielens <- movielens %>% 
+  mutate(rating_timestamp = date_format(timestamp),
+         rating_year = year(rating_timestamp),    
+         rating_month = month(rating_timestamp),
+         rating_day = day(rating_timestamp),
+         rating_hour = hour(rating_timestamp)) 
+
 #Identify films that do not have a rating in the ratings dataset
 unrated <- anti_join(movies, ratings, by = "movieId")
 dim(unrated)
+
 # Validation set will be 10% of MovieLens data
 set.seed(1)
 test_index <- createDataPartition(y = movielens$rating, times = 1, p = 0.1, list = FALSE)
@@ -83,21 +102,6 @@ edx <- rbind(edx, removed)
 #Using string it is clear that there is a small number of dimensions in the training set.
 str(edx)
 
-#Format the timestamp 
-date_format <- function(date){
-#POSIXct formatting
-#Round the time to the nearest hour in order to group by hour later 
-  new_date <- as_datetime(date, origin="1970-01-01") 
-  round_date(new_date, unit = "1 hour")              
-}
-#Create new features for release year and the rating timestamp
-edx <- edx %>%
-  mutate(rating_timestamp = date_format(timestamp),
-         rating_year = year(rating_timestamp),    
-         rating_month = month(rating_timestamp),
-         rating_day = day(rating_timestamp),
-         rating_hour = hour(rating_timestamp)) 
-
 # Free up memory. The movies dataset is kept in memory in order to perform some validations on movies only. For example number of movies released per year.
 rm(removed, movielens, ratings, temp)
 
@@ -115,6 +119,7 @@ sapply(edx, function(x) sum(length(which(is.na(x)))))
 #Check for duplication in the training set. This is performed using the duplicated() function to create a vector of logical values. This is run in combination with table() to verify if there are any duplicate entries. 
 #The duplicate check takes place before the genre variable has been split to a specific film category. 
 #The duplicated() statement is process intensive so has been commented out to skip for subsequent repeat processing.
+
 #table(duplicated(edx))
 
 #Split the genres in to specific categories in order to assess the data by a single genre rather than a combination of genres. So for example, 
@@ -133,13 +138,6 @@ n_distinct(unrated)     #How many films where not rated.
 n_distinct(edx$movieId) #How many films have been rated
 n_distinct(edx$userId)  #How many unique users provided ratings
 
-#Number of movies released by year. Use geom_col() instead of geom_bar() as I wish to use the count created in the data with the summarize
-movies %>% group_by(release_year) %>%
-  summarise(releases = n()) %>%
-  ggplot(aes(x=release_year, y=releases)) +
-  geom_col() + 
-  coord_flip() 
-
 #Number of movies percentage by decade 
 ## Group years by decade using floor_date()
 ## Convert the decades to a discrete (categorical) variable with factor() in order to get the correct labels for geom_bar(). 
@@ -157,23 +155,16 @@ movies %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), unit = "
 
 #Distribution of ratings by Decade
 edx_categories %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), unit = "10 years"))) %>%
-  group_by(decade) %>%
-  summarise(mean_rating = mean(rating)) %>%
-  ggplot(aes(x=factor(decade), y=mean_rating)) +
-  geom_col(fill="#1380A1") +
-  bbc_style() +
-  labs(title="Avg: Ratings by Decade",
+  group_by(decade, category) %>%
+  summarise(rating_count = n(),
+            mean_rating = mean(rating)) %>%
+  ggplot(aes(x=category, y=mean_rating, size=rating_count, color=decade)) +
+  geom_point() +
+  labs(title="Avg: Ratings over time",
        subtitle = "Average rating received for movies by release date") +
   theme(axis.ticks.x = element_line(colour = "#333333"),
-        axis.ticks.length =  unit(0.26, "cm")) +
-   geom_label(aes(label = round(mean_rating,2)),
-             hjust = 0.5, 
-             vjust = 1, 
-             colour = "white", 
-             fill = NA, 
-             label.size = NA, 
-             family="Helvetica", 
-             size = 6)
+        axis.ticks.length =  unit(0.26, "cm"),
+        axis.text.x =element_text(angle = 90, hjust = 1))
 
 #Distribution of ratings by Decade
 #Introducing facet wrapping
@@ -235,12 +226,6 @@ edx_categories %>% group_by(rating_month, rating_day) %>%
   labs(title="Thanksgiving?",
        subtitle = "Number of ratings by Month and Day")
 
-#Distribution of ratings by Movie
-edx_categories %>% group_by(category, rating, movieId) %>%
-  summarise(mean_rating = mean(rating)) %>%
-  ggplot(aes(x=mean_rating)) +
-  geom_density(alpha = .3)
-
 #Distribution of Ratings
 options(scipen=10000)     #Stop ggplot2 using abbreviations for labels
 edx_categories %>% 
@@ -256,7 +241,7 @@ edx_categories %>%
 edx_categories %>% group_by(movieId) %>%
   summarise(mean_rating = mean(rating)) %>%
   ggplot(aes(mean_rating)) + 
-  geom_histogram(fill="#1380A1") +
+  geom_density(fill="#1380A1") +
   geom_hline(yintercept = 0, size = 1, colour="#333333") +
   xlab("Movie Rating") +
   labs(title="Distribution of Average Movie Ratings") + 
@@ -283,9 +268,6 @@ edx_categories %>% group_by(movieId, category) %>%
   xlab("Movie Rating") +
   labs(title="Distribution of Average Movie Ratings") + 
   bbc_style()
-
-
-#ANSEO% of ratings at the weekend (Friday, Saturday, Sunday)
 
 #Analyse films that have been remade and compare the ratings.
 remakes <- edx_categories %>% group_by(film, release_year) %>%
@@ -314,7 +296,6 @@ dubbell_edx <- remakes %>%
   select(film, mean_rating, version) %>%
   spread(version, mean_rating) %>%
   mutate(difference = latest-original) 
-
 
 #Use a dumbbell_geom() to compare the ratings of original versions and the latest remake
 dubbell_edx %>% 
@@ -364,27 +345,27 @@ dubbell_edx %>% filter(latest > original) %>%
 
 toc()
 ####Modelling preparation ---- 
-feature_var_edx <- nearZeroVar(edx_ext, saveMetrics = TRUE)
-feature_var_edx 
-
-
+tic("Model preparation")
 #Analyse Zero and near-zero variance features. The key fields to check are zeroVar and nzv field. 
 #If either are TRUE then the feature would need to be checked further.  
 #For MovieLens the nzv is not going to be that relevant except for Category.
 #For percentUnique - the lower the percentage, the lower the number of unique values. E.g. Ratings and Year
-ANSEO - check if there is a calculation for feature variance in the caret package
+feature_var_edx <- nearZeroVar(edx_categories, saveMetrics = TRUE)
 feature_variance <- nearZeroVar(edx, saveMetrics = TRUE)
-feature_variance
 Feature_variance_movies <- nearZeroVar(movies, saveMetrics = TRUE)
+feature_var_edx 
+feature_variance
 Feature_variance_movies
 
+
+ANSEO - check if there is a calculation for feature variance in the caret package
 #Correlation and linearity
 #Peason or Spearman? Explain
 #Provide the calculation for the correlation and explain it
 edx_cor <- cor(edx, method = "spearman")
 
 
-
+toc()
 ####Model 1 ----
 ####Model 2 ----
 ####Model 3 ----
