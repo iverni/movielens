@@ -20,6 +20,7 @@ pacman::p_load('data.table',                              # Data Importation
 # MovieLens 100K dataset:
 # http://files.grouplens.org/datasets/movielens/ml-latest-small.zip
 #
+tic("Prepare Ratings and Movies datasets")
 dir_file_ratings <- "ml-1m/ratings.dat"   
 dir_file_movies <- "ml-1m/movies.dat"
 if(!file.exists(dir_file_ratings) || !file.exists(dir_file_movies)) {
@@ -27,19 +28,13 @@ if(!file.exists(dir_file_ratings) || !file.exists(dir_file_movies)) {
   dl_file <- tempfile()
   download.file("http://files.grouplens.org/datasets/movielens/ml-1m.zip", dl_file)
   toc()
-  tic("Prepare ratings")
   ratings <- read.table(text = gsub("::", "\t", readLines(unzip(dl_file, dir_file_ratings))),
                         col.names = c("userId", "movieId", "rating", "timestamp"))
-  toc()
-  tic("Prepare movies")
   movies <- str_split_fixed(readLines(unzip(dl_file, dir_file_movies)), "\\::", 3)
 } else {
   print("Files already exist and do not need to be downloaded again")
-  tic("Prepare ratings")
   ratings <- read.table(text = gsub("::", "\t", readLines(dir_file_ratings)),
                         col.names = c("userId", "movieId", "rating", "timestamp"))
-  toc()
-  tic("Prepare movies")
   movies <- str_split_fixed(readLines(dir_file_movies), "\\::", 3)
 }
 
@@ -62,8 +57,7 @@ string_format <- function(x){
 movies <- movies %>%
   mutate(release_year = string_format(title),
          film = str_replace(title, pattern, "")) 
-toc()
-
+toc() 
 ####Data Preparation----
 tic("Data Preparation")
 movielens <- left_join(ratings, movies, by = "movieId")
@@ -120,7 +114,8 @@ sapply(edx, function(x) sum(length(which(is.na(x)))))
 
 #Check for duplication in the training set. This is performed using the duplicated() function to create a vector of logical values. This is run in combination with table() to verify if there are any duplicate entries. 
 #The duplicate check takes place before the genre variable has been split to a specific film category. 
-table(duplicated(edx))
+#The duplicated() statement is process intensive so has been commented out to skip for subsequent repeat processing.
+#table(duplicated(edx))
 
 #Split the genres in to specific categories in order to assess the data by a single genre rather than a combination of genres. So for example, 
 # "Musical|Romance" will be split out to "Musical" and "Romance"
@@ -129,15 +124,12 @@ edx_categories <- edx %>%
   separate_rows(category, sep ="[|]") 
 
 sapply(edx_categories, function(x) sum(length(which(is.na(x)))))
-summary(edx_categories$category)  #This demonstrates that it is necessary to factorize the category variable
 edx_categories$category <- as.factor(edx_categories$category)
 
 toc()
 ####Exploratory Data Analysis----
 tic("Exploratory Data Analysis")
-#How many films where not rated.
-dim(unrated)
-
+n_distinct(unrated)     #How many films where not rated.
 n_distinct(edx$movieId) #How many films have been rated
 n_distinct(edx$userId)  #How many unique users provided ratings
 
@@ -148,8 +140,9 @@ movies %>% group_by(release_year) %>%
   geom_col() + 
   coord_flip() 
 
-#Number of movies percentage by decade - 2 skills - redefine the scale, switch the bins by factoring the x axis. 
-## Convert the decades to a discrete (categorical) variable with factor() in order to get the correct labels.
+#Number of movies percentage by decade 
+## Group years by decade using floor_date()
+## Convert the decades to a discrete (categorical) variable with factor() in order to get the correct labels for geom_bar(). 
 movies %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), unit = "10 years"))) %>%
   group_by(decade) %>%
   summarise(releases = n()) %>%
@@ -157,20 +150,20 @@ movies %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), unit = "
   geom_col(fill="#1380A1") +
   geom_text(size = 3, position = position_dodge(width = 1), vjust = -0.25) +
   bbc_style() +
-  labs(title="Movie Rated",
-       subtitle = "Number of movies released per decade that have been rated") +
+  labs(title="Movies Released by Decade",
+       subtitle = "Number of films released per decade that have been rated") +
   theme(axis.ticks.x = element_line(colour = "#333333"),
         axis.ticks.length =  unit(0.26, "cm")) 
 
-#Distribution of ratings by movie
+#Distribution of ratings by Decade
 edx_categories %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), unit = "10 years"))) %>%
   group_by(decade) %>%
   summarise(mean_rating = mean(rating)) %>%
   ggplot(aes(x=factor(decade), y=mean_rating)) +
   geom_col(fill="#1380A1") +
   bbc_style() +
-  labs(title="Average Movie Rating",
-       subtitle = "Average rating received for movies released per decade") +
+  labs(title="Avg: Ratings by Decade",
+       subtitle = "Average rating received for movies by release date") +
   theme(axis.ticks.x = element_line(colour = "#333333"),
         axis.ticks.length =  unit(0.26, "cm")) +
    geom_label(aes(label = round(mean_rating,2)),
@@ -182,7 +175,8 @@ edx_categories %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), 
              family="Helvetica", 
              size = 6)
 
-#Distribution of ratings by movie
+#Distribution of ratings by Decade
+#Introducing facet wrapping
 edx_categories %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), unit = "10 years"))) %>%
   group_by(decade, category) %>%
   summarise(mean_rating = mean(rating)) %>%
@@ -192,93 +186,181 @@ edx_categories %>% mutate(decade = year(floor_date(ISOdate(release_year, 1, 1), 
   scale_fill_discrete(name="Rating") +
   coord_flip() +
   labs(title="Average Movie Rating",
-         subtitle = "Average rating 4.0 or higher")
+         subtitle = "Average rating 4.0 or higher highlighted in red")
 
-ANSEO - STOPPED HERE Reduce the size of the BBC X and Y axes
+#Display the distribution by the Day of the Week and hour of the rating that was provided by the user.
+edx_categories %>% mutate(day_of_week = wday(rating_timestamp, label = TRUE)) %>%
+  group_by(day_of_week, rating_hour, category) %>%
+  summarise(mean_rating = mean(rating),
+            num_ratings = n()) %>%
+  ggplot(aes(x=day_of_week, y=rating_hour, fill=num_ratings)) +
+  geom_tile() +
+  facet_wrap(~category) +
+  scale_fill_continuous(name="#Ratings") +
+  xlab("Day of Week")+
+  ylab("Hours (24h format)")+
+  labs(title="Temporal Analysis of Ratings",
+       subtitle = "Number of ratings by Hour and Day of the week")
+
+#The following tibble supports the findings of the heat map, showing that Comedy, Drama and Action receive the largest amount of ratings.
+edx_categories %>% group_by(category) %>%
+  summarise(mean_rating = mean(rating),
+            num_ratings = n()) %>%
+  arrange(desc(num_ratings))
+
+#Display the distribution by the Day of the Week and hour of the rating that was provided by the user.
+edx_categories %>% mutate(day_of_week = wday(rating_timestamp, label = TRUE)) %>%
+  group_by(day_of_week, rating_hour, category) %>%
+  summarise(mean_rating = mean(rating),
+            num_ratings = n()) %>%
+  top_n(3) %>% 
+  ggplot(aes(x=day_of_week, y=as.factor(rating_hour), fill=num_ratings)) +
+  geom_tile() +
+  facet_wrap(~category) +
+  scale_fill_continuous(name="#Ratings") +
+  xlab("Day of Week")+
+  ylab("Hours (24h format)")+
+  labs(title="Temporal Analysis of Ratings - Top 3",
+       subtitle = "Number of ratings by Hour and Day of the week")
+
+#Display the distribution by the Day of the Week and Month of the rating that was provided by the user.
+edx_categories %>% group_by(rating_month, rating_day) %>%
+  summarise(mean_rating = mean(rating),
+            num_ratings = n()) %>%
+  ggplot(aes(x=as.factor(rating_month), y=as.factor(rating_day), fill=num_ratings)) +
+  geom_tile() +
+  scale_fill_continuous(name="#Ratings") +
+  xlab("Month")+
+  ylab("Calendar Day")+
+  labs(title="Thanksgiving?",
+       subtitle = "Number of ratings by Month and Day")
+
+#Distribution of ratings by Movie
+edx_categories %>% group_by(category, rating, movieId) %>%
+  summarise(mean_rating = mean(rating)) %>%
+  ggplot(aes(x=mean_rating)) +
+  geom_density(alpha = .3)
+
+#Distribution of Ratings
+options(scipen=10000)     #Stop ggplot2 using abbreviations for labels
+edx_categories %>% 
+  ggplot(aes(rating)) + 
+  geom_histogram(fill="#1380A1", binwidth = 0.5) +
+  geom_hline(yintercept = 0, size = 1, colour="#333333") +
+  xlab("Movie Rating") +
+  labs(title="Distribution of Ratings") + 
+  bbc_style()
+
+#Distribution of Average Movie ratings
+#The distribution of edx_categories and edx was compared to verify that the distribution was similar when the genres where split out to specific categories
+edx_categories %>% group_by(movieId) %>%
+  summarise(mean_rating = mean(rating)) %>%
+  ggplot(aes(mean_rating)) + 
+  geom_histogram(fill="#1380A1") +
+  geom_hline(yintercept = 0, size = 1, colour="#333333") +
+  xlab("Movie Rating") +
+  labs(title="Distribution of Average Movie Ratings") + 
+  bbc_style()
+
+#Distribution of Average Movie ratings
+#The distribution of edx_categories and edx was compared to verify that the distribution was similar when the genres where split out to specific categories
+edx_categories %>% group_by(movieId, category) %>%
+  summarise(mean_rating = mean(rating)) %>%
+  ggplot(aes(mean_rating, fill = category)) + 
+  geom_density(alpha = .3) +
+  geom_hline(yintercept = 0, size = 1, colour="#333333") +
+  xlab("Movie Rating") +
+  labs(title="Distribution of Average Movie Ratings") + 
+  bbc_style()
 
 #Average rating by category
-#Average rating by time of day
-#Average rating by month
-#Average rating by day
-#Distribution of ratings by movie release year
+#The distribution of edx_categories and edx was compared to verify that the distribution was similar when the genres where split out to specific categories
+edx_categories %>% group_by(movieId, category) %>%
+  summarise(mean_rating = mean(rating)) %>%
+  ggplot(aes(mean_rating, fill = category)) + 
+  geom_density(alpha = .3) +
+  geom_hline(yintercept = 0, size = 1, colour="#333333") +
+  xlab("Movie Rating") +
+  labs(title="Distribution of Average Movie Ratings") + 
+  bbc_style()
 
-#Can you identify remakes and compare the ratings and number of ratings?
-ANSEO Mutate to identify the original and colour code it. So set the minimum year to original!!!!
-ANSEO Code a text.....maybe the remake was a bad idea.......identify the difference for Get Carter......
-ANSEO Use symbols to identify the original
-ANSEO Use colour to identify the decade
-ANSEO Introduce the BBC plot formatting for this output
-edx_ext %>% group_by(film, release_year) %>%
-  summarise(total_ratings = n(),
+
+#ANSEO% of ratings at the weekend (Friday, Saturday, Sunday)
+
+#Analyse films that have been remade and compare the ratings.
+remakes <- edx_categories %>% group_by(film, release_year) %>%
+  summarise(ratings_count = n(),
             mean_rating = mean(rating)) %>%
   group_by(film) %>%
-  filter(n()>1) %>% 
-  ggplot(aes(x = film, y = mean_rating)) +
-  geom_point() +
-  coord_flip()
+  filter(n()>1) 
+
+remakes %>% ggplot(aes(x = film, y = mean_rating, label = release_year, size=ratings_count)) +
+  geom_point(col="#1380A1") +
+  coord_flip() +
+  geom_text(size = 2, position = position_dodge(width = 1), vjust = 2.2) +
+  xlab("Average Movie Rating")+
+  ylab("Remakes")+
+  labs(title="Movie Remakes",
+       subtitle = "How do the ratings of the remakes compare?")
+
+#On average, does the remake tend to get better results?
+#find the year with the minimum mean_rating and the year with the maximum
+#Check which is better, the earlier or later version
+#Flag the result and highlight in a dumbell. 
+dubbell_edx <- remakes %>% 
+  group_by(film) %>%
+  mutate(version = ifelse(release_year == min(release_year), "original", ifelse(release_year == max(release_year), "latest", "skip"))) %>%
+  filter(version %in% c("original","latest")) %>%
+  select(film, mean_rating, version) %>%
+  spread(version, mean_rating) %>%
+  mutate(difference = latest-original) 
 
 
+#Use a dumbbell_geom() to compare the ratings of original versions and the latest remake
+dubbell_edx %>% 
+  ggplot(aes(x = original, xend = latest, y = film)) + 
+  geom_dumbbell(colour = "#dddddd",
+                size = 2,
+                colour_x = "#FAAB18",
+                colour_xend = "#1380A1",
+                dot_guide=TRUE, dot_guide_size=0.25,
+                show.legend = TRUE) +
+  geom_vline(xintercept = mean(remakes$mean_rating), color="blue") +
+  annotate("text", x = 4.05, y = 37, vjust = 0.5, hjust = 0, label = "Original", size=4, colour="#FAAB18") +
+  annotate("text", x = 4.05, y = 35, vjust = 0.5, hjust = 0, label = "Last Remake", size=4, colour="#1380A1") +
+  xlab("Average Movie Rating")+
+  bbc_style() +
+  theme(panel.grid.major.x = element_line(color="#cbcbcb"), 
+        panel.grid.major.y = element_line(FALSE),
+        axis.line.x = element_line(colour = "#333333"),
+        axis.line.y = element_line(colour = "#333333"),
+        axis.text = element_text(size = 9),
+        axis.ticks.x = element_line(colour = "#333333"),
+        axis.ticks.length =  unit(0.26, "cm")) +
+  labs(title="Rebooted",
+       subtitle="How did the latest version compare to the original?")         
 
-
-edx_ext %>% ggplot(aes(x = category)) +
-  geom_bar() +
-  coord_flip()
-
-edx_ext %>% ggplot(aes(x = year, fill = category)) +
-  geom_bar() + 
-  coord_flip()
-
-edx_ext %>% ggplot(aes(x = category)) +
-  geom_bar() +
-  coord_flip()
-
-#Need to scale the outputs as the count is that useful.
-#Need to label the outputs
-#Need to adjust the X scale
-
-#Display the distribution by Month
-edx_ext %>% ggplot(aes(x=rating_month)) +
-  geom_bar()
-
-#Display the distribution by weekday
-edx_ext %>% mutate(weekday = wday(rating_timestamp, label = TRUE)) %>%
-  ggplot(aes(x=weekday)) +
-  geom_bar()
-
-#Display the distribution by Time of day
-edx_ext %>% ggplot(aes(x=rating_hour)) +
-  geom_bar()
-
-
-
-
-% of ratings at the weekend (Friday, Saturday, Sunday)
-% of ratings by season
-Could extend this further to compare if seasonality is a predictor. Identify the specific dates that are holiday periods and then an
-
-
-
-
-
-# The category variable will then be converted to a factor so that it may be used in later visualisation.
-ANSEO - STOPPED HERE. Need to check out what is happening with the factors here. See the GGPLOT THAT SHOWS THAT 
-THERE IS SOME FILMS THAT HAVE NOT BEEN FACETED CORRECTLY. REFER TO THE "NOVEL LEVELS"
-
-
-
-# The timestamp will be converted to the relevnt POSITcx format, although it is not yet certain if this information is really necessary. It may be interesting to 
-# to consider the temperural data as a separate dimension. Does the weekday influence the recommendation? does the age of the film also influence whether is should be recommended or not?
-
-
-# Do I need to scale?
-
-
-#Eliminate zero variance features and low level variance features as desired
-
-
-
-
-
+#Use a dumbbell_geom() to compare the remake successed
+dubbell_edx %>% filter(latest > original) %>%
+  ggplot(aes(x = original, xend = latest, y = film)) + 
+  geom_dumbbell(colour = "#dddddd",
+                size = 2,
+                colour_x = "#FAAB18",
+                colour_xend = "#1380A1",
+                dot_guide=TRUE, dot_guide_size=0.25,
+                show.legend = TRUE) +
+  geom_vline(xintercept = mean(remakes$mean_rating), color="blue") +
+  xlab("Average Movie Rating")+
+  bbc_style() +
+  theme(panel.grid.major.x = element_line(color="#cbcbcb"), 
+        panel.grid.major.y = element_line(FALSE),
+        axis.line.x = element_line(colour = "#333333"),
+        axis.line.y = element_line(colour = "#333333"),
+        axis.text = element_text(size = 9),
+        axis.ticks.x = element_line(colour = "#333333"),
+        axis.ticks.length =  unit(0.26, "cm")) +
+  labs(title="Rebooted Successfully!",
+       subtitle="The Remake has better ratings than the original")     
 
 toc()
 ####Modelling preparation ---- 
