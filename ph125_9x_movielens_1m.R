@@ -1,3 +1,4 @@
+#Train a machine learning algorithm using the inputs in one subset to predict movie ratings in the validation set. 
 ####Load packages and Libraries----
 ## Packages
 # pacman    : This contains tools to more conveniently perform tasks associated with add-on packages.
@@ -346,28 +347,20 @@ dubbell_edx %>% filter(latest > original) %>%
 toc()
 ####Modelling preparation ---- 
 tic("Model preparation")
-#Analyse Zero and near-zero variance features. The key fields to check are zeroVar and nzv field. 
-#If either are TRUE then the feature would need to be checked further.  
-#For MovieLens the nzv is not going to be that relevant except for Category.
-#For percentUnique - the lower the percentage, the lower the number of unique values. E.g. Ratings and Year
-feature_var_edx <- nearZeroVar(edx_categories, saveMetrics = TRUE)
-feature_variance <- nearZeroVar(edx, saveMetrics = TRUE)
-Feature_variance_movies <- nearZeroVar(movies, saveMetrics = TRUE)
-feature_var_edx 
-feature_variance
-Feature_variance_movies
 
-
-ANSEO - check if there is a calculation for feature variance in the caret package
 #Correlation and linearity
 #Peason or Spearman? Explain
 #Provide the calculation for the correlation and explain it
-edx_cor <- cor(edx, method = "spearman")
-
 
 toc()
-####Model 1 ----
-####Model 2 ----
+####Model 1: Predict the same rating for all movies regardless of user ----
+tic("Model 1: Predict the same rating for all movies regardless of user")
+mu_hat <- mean(edx$rating)
+mu_hat
+naive_rmse <- RMSE(validation$rating, mu_hat)
+naive_rmse
+toc()
+####Model 2: Modeling movie effects ----
 ####Model 3 ----
 ####Model 4 ----
 ####Model 5 ----
