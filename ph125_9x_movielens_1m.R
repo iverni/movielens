@@ -4,17 +4,21 @@
 # pacman    : This contains tools to more conveniently perform tasks associated with add-on packages.
 # snakecase : Collection of miscellaneous utility functions, supporting data transformation
 # ggalt     : Support geom_dumbbell()
+# matrixStats : Functions that Apply to Rows and Columns of Matrices (and to Vectors)
 # devtools  : Collection of R development tools
 if(!require(pacman))install.packages("pacman")
 if(!require(snakecase))install.packages('snakecase')
 if(!require(ggalt))install.packages('ggalt')
 if(!require(devtools))install.packages('devtools')
+if(!require(matrixStats))install.packages('matrixStats')
+if(!require(randomForest))install.packages('randomForest')
 devtools::install_github('bbc/bbplot')    #Load the BBC plots for use with ggplot2
 pacman::p_load('data.table',                              # Data Importation
                'tidyverse', 'dplyr', 'tidyr', 'stringr',  # Data Manipulation
                'sjmisc', 'snakecase', 'lubridate',        # Data Manipulation
+               'matrixStats',                             # Data Manipulation
                'ggplot2', 'bbplot', 'ggalt',              # Visualisation 
-               'caret',                                   # Classification and Regression 
+               'caret', 'randomForest',                   # Classification and Regression 
                'tictoc'                                   # Performance measuring
 )
 
@@ -131,6 +135,14 @@ edx_categories <- edx %>%
 
 sapply(edx_categories, function(x) sum(length(which(is.na(x)))))
 edx_categories$category <- as.factor(edx_categories$category)
+
+#Need to split the validation set to category level.
+validation_categories <- validation %>%
+  mutate(category = genres) %>% 
+  separate_rows(category, sep ="[|]") 
+
+sapply(validation_categories, function(x) sum(length(which(is.na(x)))))
+validation_categories$category <- as.factor(validation_categories$category)
 
 toc()
 ####Exploratory Data Analysis----
@@ -346,12 +358,11 @@ dubbell_edx %>% filter(latest > original) %>%
 
 toc()
 ####Modelling preparation ---- 
+###Predictor preprocessing
+#Near zero was assessed however it is not useful for the MovieLens dataset. 
+#The majority of features are between 1:2. The function nearZeroVar is removed as it is processive intensive and does not add any value to this program.
+#saveMetrics = TRUE enables detailed analysis of the feature comparison. If you receive an integer0 answer it indicates no features are being processed for removal.
 tic("Model preparation")
-
-#Correlation and linearity
-#Peason or Spearman? Explain
-#Provide the calculation for the correlation and explain it
-
 toc()
 ####Model 1: Predict the same rating for all movies regardless of user ----
 tic("Model 1: Predict the same rating for all movies regardless of user")
@@ -359,10 +370,121 @@ mu_hat <- mean(edx$rating)
 mu_hat
 naive_rmse <- RMSE(validation$rating, mu_hat)
 naive_rmse
+rmse_results <- data_frame(method = "Just the average", RMSE = naive_rmse)
 toc()
 ####Model 2: Modeling movie effects ----
-####Model 3 ----
-####Model 4 ----
-####Model 5 ----
+#Using a linear regression lm() results in the vector memory being exhausted
+tic("Model 2: Predict using the movie effect")
+#Calculate the average rating for each movie and define b_1 (difference) for each
+add_results <- function(n_rmse, model_method){
+  bind_rows(rmse_results,
+            data_frame(method=model_method,  
+                       RMSE = naive_rmse))
+}
+movie_avgs <- edx %>% 
+  group_by(movieId) %>% 
+  summarize(b_i = mean(rating - mu_hat))
+
+# Plot the difference to show the distribution
+movie_avgs %>% qplot(b_i, geom ="histogram", bins = 10, data = ., color = I("black"))
+rm(naive_rmse)
+rm(predicted_ratings)
+predicted_ratings <- mu_hat + validation %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  pull(b_i)
+  
+naive_rmse <- RMSE(predicted_ratings, validation$rating)
+naive_rmse
+rmse_results <- add_results(naive_rmse, "Movie Effect Model")  
+
+toc()
+####Model 3: User effects ---- 
+tic("Model 3: Predict using the user effect")
+user_avgs <- edx %>% 
+  group_by(userId) %>% 
+  summarize(b_u = mean(rating - mu_hat))
+
+# Plot the difference to show the distribution
+user_avgs %>% qplot(b_u, geom ="histogram", bins = 10, data = ., color = I("black"))
+rm(naive_rmse)
+rm(predicted_ratings)
+predicted_ratings <- mu_hat + validation %>% 
+  left_join(user_avgs, by='userId') %>%
+  pull(b_u)
+
+naive_rmse <- RMSE(predicted_ratings, validation$rating)
+naive_rmse
+rmse_results <- add_results(naive_rmse, "User Effect Model")  
+toc()
+####Model 4: User + Movie effects ---- 
+tic("Model 4: Predict using the user effect")
+user_movie_avgs <- edx %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  group_by(userId) %>% 
+  summarize(b_u = mean(rating - mu_hat - b_i))   #mean(y_u,i)
+
+# Plot the difference to show the distribution
+user_movie_avgs %>% qplot(b_u, geom ="histogram", bins = 10, data = ., color = I("black"))
+rm(predicted_ratings)
+predicted_ratings <- validation %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_movie_avgs, by='userId') %>% 
+  mutate(pred = mu_hat + b_i + b_u) %>%
+  pull(pred)
+
+naive_rmse <- RMSE(predicted_ratings, validation$rating)
+naive_rmse
+rmse_results <- add_results(naive_rmse, "User + Movie Effect Model")  
+toc()
+
+####Model 5: User + Movie + Genre Effect ----
+tic("Model 5: Predict using the user, movie and category effect")
+category_avgs <- edx_categories %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_movie_avgs, by='userId') %>%
+  group_by(category) %>% 
+  summarize(b_c = mean(rating - mu_hat - b_i - b_u))   #mean(y_u,i,c)
+
+# Plot the difference to show the distribution
+category_avgs %>% qplot(b_c, geom ="histogram", bins = 10, data = ., color = I("black"))
+rm(predicted_ratings)
+
+#Need to split the validation set to category level.
+
+predicted_ratings <- validation_categories %>% 
+  left_join(movie_avgs, by='movieId') %>%
+  left_join(user_movie_avgs, by='userId') %>% 
+  left_join(category_avgs, by='category') %>% 
+  mutate(pred = mu_hat + b_i + b_u + b_c) %>%
+  pull(pred)
+
+naive_rmse <- RMSE(predicted_ratings, validation_categories$rating)
+naive_rmse
+rmse_results <- add_results(naive_rmse, "User + Movie + Category Effect Model")  
+toc()
+
+
+
+
+
+ANSEO
+
+####Model 5: Regularisation ----
+####Model 6: Penalised Least Square  ----
+####Model 7: User Movie Matrix  ----
+####Model 8: Matrix Factorisation  ----
+####Model 9: Matrix Factorisation  ----
 ####Model Comparison----
+
+edx2 <- edx %>% select(-c(userId, movieId, genres))
+rm(edx, validation_categories, edx_categories)
+ols <- lm(rating ~., data = edx2 )
+https://stackoverflow.com/questions/51248293/error-vector-memory-exhausted-limit-reached-r-3-5-0-macos
+sessionInfo() 
+#Execute the following in Terminal to create a temporary environmental 
+#variable R_MAX_VSIZE with value 32GB (change to suit): 
+#export R_MAX_VSIZE=32000000000
+
 ####Findings----
+gc()  # initiates the garbage collector which causes R to free memory from objects no longer used.
+rm(rmse_results, naive_rmse, predicted_ratings)
